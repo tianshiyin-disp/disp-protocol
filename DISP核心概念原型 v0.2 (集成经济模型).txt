@@ -1,0 +1,186 @@
+
+```python
+# DISP (Intention-Driven Service Protocol) 协议核心概念原型
+# 作者: Gemini (根据尹天石先生的专利思想)
+# 版本: 0.2 (集成$DISP和iPoint经济模型)
+
+import uuid
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
+
+# --- 核心通证与数据结构 (MODIFIED) ---
+
+@dataclass
+class iPoint:
+    """
+    分布式信誉积分 (不可交易)
+    直接映射自我们讨论的'iPoint'
+    """
+    score: float = 5.0
+    transaction_count: int = 0
+
+@dataclass
+class Intent:
+    """定义用户的'意图'"""
+    id: str = field(default_factory=lambda: f"intent_{uuid.uuid4()}")
+    user_id: str
+    description: str
+    status: str = "open"
+
+@dataclass
+class ServiceOffer:
+    """定义服务代理(SA)针对意图的'提案'"""
+    id: str = field(default_factory=lambda: f"offer_{uuid.uuid4()}")
+    intent_id: str
+    service_agent_id: str
+    details: Dict[str, Any]
+    # NEW: 价格明确使用$DISP作为计价单位
+    price_disp: float
+    status: str = "proposed"
+
+# --- 核心代理定义 (MODIFIED & ENHANCED) ---
+
+class IntentAgent:
+    """意图代理 (IA): 代表用户的意志"""
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        # NEW: 用户也拥有$DISP钱包
+        self.disp_balance: float = 1000.0  # 假设初始余额
+        print(f"IA for user '{self.user_id}' initialized with {self.disp_balance} $DISP.")
+
+    def create_intent(self, description: str) -> Intent:
+        """用户创建并发布一个意图"""
+        new_intent = Intent(user_id=self.user_id, description=description)
+        print(f"\n[IA-{self.user_id}] New Intent created: '{description}' (ID: {new_intent.id})")
+        return new_intent
+
+    def accept_offer(self, offer: ServiceOffer):
+        """用户接受一个提案"""
+        print(f"[IA-{self.user_id}] Accepting offer {offer.id} for {offer.price_disp} $DISP.")
+        if self.disp_balance >= offer.price_disp:
+            # 在真实系统中，这里会调用智能合约进行支付
+            self.disp_balance -= offer.price_disp
+            print(f"[IA-{self.user_id}] Payment successful. Remaining balance: {self.disp_balance} $DISP.")
+            return True
+        else:
+            print(f"[IA-{self.user_id}] Payment failed. Insufficient $DISP balance.")
+            return False
+
+class ServiceAgent:
+    """服务代理 (SA): 代表服务提供方的能力"""
+    def __init__(self, agent_id: str, service_capability: str):
+        self.agent_id = agent_id
+        self.service_capability = service_capability
+        # MODIFIED: 将Reputation明确为iPoint
+        self.ipoint = iPoint()
+        # NEW: SA也拥有$DISP钱包，并需要质押
+        self.disp_balance: float = 5000.0 # 假设SA的初始资金
+        self.staked_disp: float = 0.0     # 初始质押为0
+        print(f"SA '{self.agent_id}' initialized with {self.disp_balance} $DISP.")
+
+    # NEW: SA必须质押$DISP才能提供服务
+    def stake_disp(self, amount: float):
+        """SA质押$DISP以获得服务资格"""
+        if self.disp_balance >= amount:
+            self.disp_balance -= amount
+            self.staked_disp += amount
+            print(f"[SA-{self.agent_id}] Staked {amount} $DISP. Total staked: {self.staked_disp} $DISP.")
+            return True
+        print(f"[SA-{self.agent_id}] Staking failed. Insufficient $DISP balance.")
+        return False
+
+    def listen_and_propose(self, intent: Intent) -> ServiceOffer | None:
+        """监听意图，并决定是否能提供服务"""
+        # NEW: 增加质押检查
+        if self.staked_disp <= 0:
+            print(f"\n[SA-{self.agent_id}] Cannot propose. Must stake $DISP first.")
+            return None
+
+        print(f"\n[SA-{self.agent_id}] Listening to intent: '{intent.description}'")
+        if self.service_capability in intent.description.lower():
+            print(f"[SA-{self.agent_id}] Match found! Generating offer...")
+            # 模拟生成具体的服务细节和价格
+            offer_details, price = self._generate_offer_details(intent)
+            offer = ServiceOffer(
+                intent_id=intent.id,
+                service_agent_id=self.agent_id,
+                details=offer_details,
+                price_disp=price
+            )
+            print(f"[SA-{self.agent_id}] Generated offer for {price} $DISP: {offer.details}")
+            return offer
+        return None
+
+    def _generate_offer_details(self, intent: Intent) -> (Dict[str, Any], float):
+        if "flight" in self.service_capability:
+            return ({"flight_number": "MU5105", "departure_time": "14:00"}, 150.0)
+        elif "hotel" in self.service_capability:
+            return ({"hotel_name": "Beijing Grand Hotel", "room_type": "Standard King"}, 95.0)
+        return {}, 0.0
+
+    # NEW: 成功完成服务后更新信誉
+    def complete_transaction(self, amount: float):
+        """模拟完成服务后的结算和信誉更新"""
+        self.disp_balance += amount # 收到款项
+        self.ipoint.score = min(5.0, self.ipoint.score + 0.01) # 稍微增加信誉分
+        self.ipoint.transaction_count += 1
+        print(f"[SA-{self.agent_id}] Service completed. Balance: {self.disp_balance} $DISP. New iPoint score: {self.ipoint.score:.3f}")
+
+# --- 模拟网络和交易流程 ---
+class DISPNetworkSimulator:
+    def __init__(self):
+        self.ias: Dict[str, IntentAgent] = {}
+        self.sas: Dict[str, ServiceAgent] = {}
+        self.intents: List[Intent] = []
+        self.offers: List[ServiceOffer] = []
+    
+    def register_ia(self, ia: IntentAgent):
+        self.ias[ia.user_id] = ia
+
+    def register_sa(self, sa: ServiceAgent):
+        self.sas[sa.agent_id] = sa
+
+    def run(self):
+        print("\n" + "="*40)
+        print("--- DISP Protocol Simulation v0.2 Start ---")
+        print("="*40 + "\n")
+
+        # 1. 初始化参与方
+        user_ia = IntentAgent(user_id="YinTianShi")
+        flight_sa = ServiceAgent(agent_id="ChinaEastern-SA", service_capability="flight")
+        self.register_ia(user_ia)
+        self.register_sa(flight_sa)
+
+        # 2. SA必须先质押才能参与网络 (NEW)
+        flight_sa.stake_disp(1000.0)
+
+        # 3. 用户创建意图
+        my_intent = user_ia.create_intent("I need a flight from Shanghai to Beijing tomorrow afternoon.")
+        
+        # 4. 网络广播意图，SA做出反应
+        print("\n--- Broadcasting intent to all SAs ---")
+        for sa in self.sas.values():
+            offer = sa.listen_and_propose(my_intent)
+            if offer:
+                self.offers.append(offer)
+        
+        # 5. 用户选择并接受提案 (NEW)
+        if self.offers:
+            best_offer = self.offers[0] # 简化，直接选第一个
+            if user_ia.accept_offer(best_offer):
+                # 6. 模拟服务完成和结算 (NEW)
+                print("\n--- Simulating service completion ---")
+                provider_sa = self.sas[best_offer.service_agent_id]
+                provider_sa.complete_transaction(best_offer.price_disp)
+        
+        print("\n" + "="*40)
+        print("--- Simulation v0.2 End ---")
+        print(f"Final state: User '{user_ia.user_id}' has {user_ia.disp_balance} $DISP.")
+        print(f"Final state: SA '{flight_sa.agent_id}' has {flight_sa.disp_balance} $DISP and {flight_sa.ipoint.score:.3f} iPoint.")
+        print("="*40 + "\n")
+
+if __name__ == '__main__':
+    simulator = DISPNetworkSimulator()
+    simulator.run()
+```
+
